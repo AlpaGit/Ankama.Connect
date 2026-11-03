@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/examples/">
+    <Project Path="examples/Connect/Connect.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/Ankama.Connect/Ankama.Connect.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Ankama.Connect.Tests/Ankama.Connect.Tests.csproj" />
+  </Folder>
+</Solution>
