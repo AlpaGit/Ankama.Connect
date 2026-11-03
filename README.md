@@ -7,7 +7,7 @@ Features:
 - OAuth/PKCE account login
 - AWS WAF token acquisition and refresh
 - browser fingerprint and telemetry generated without a captured template
-- non-interactive AWS `mp_verify` envelope matching the browser SDK (`solution: null` and a 1024-byte zero payload)
+- non-interactive AWS `mp_verify` envelope matching the browser SDK (`solution: null` and a difficulty-sized zero payload)
 - banned-account detection
 - HTTP, HTTPS, SOCKS4 and SOCKS5 proxy support
 

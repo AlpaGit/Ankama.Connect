@@ -10,6 +10,7 @@ namespace Ankama.Connect.Tests;
 public sealed class ConnectTests
 {
     private const string ChallengeUrl = "https://3f38f7f4f368.edge.sdk.awswaf.com/3f38f7f4f368/e1fcfc58118e/challenge.js";
+    private const string MemoryChallengeType = "ha9faaffd31b4d5ede2a2e19d2d7fd525f66fee61911511960dcbb52d3c48ce25";
     private const string ObfuscatedKey = "nMy3mwe1mtjImwuWmZvLywfIntnKogjLnZmXmJbKm2zInJHHmgnHmZq2yJK1nJbHywiZztvJzgy3ntnKnwu5oa";
     private static readonly string MathConstant = "0x" + new string('f', 220);
 
@@ -112,9 +113,10 @@ public sealed class ConnectTests
             if (request.Method == HttpMethod.Get && request.RequestUri!.AbsoluteUri.StartsWith("https://auth.ankama.com/login/ankama", StringComparison.Ordinal))
                 return Html($"<script src=\"{ChallengeUrl}\"></script><script>window.gokuProps = {{\"a\":\"b\"}};</script>");
             if (request.Method == HttpMethod.Get && request.RequestUri!.AbsoluteUri == ChallengeUrl)
-                return Script(ChallengeScript("input", "hmac", "eu-south-2", 3, 128));
+                return Script(ChallengeScript("input", "hmac", "eu-south-2", 1, 128));
             if (request.Method == HttpMethod.Get && request.RequestUri!.AbsoluteUri.EndsWith("/inputs?client=browser", StringComparison.Ordinal))
-                return Json("{\"challenge\":{\"input\":\"live-input\",\"region\":\"eu-west-1\"},\"difficulty\":4,\"memory\":256}");
+                return Json("{\"challenge\":{\"input\":\"live-input\",\"region\":\"eu-west-1\"},\"challenge_type\":\"" +
+                    MemoryChallengeType + "\",\"difficulty\":1,\"memory\":256}");
             if (request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath.EndsWith("/mp_verify", StringComparison.Ordinal))
             {
                 Assert.Contains("\"input\":\"live-input\"", body);
@@ -148,6 +150,27 @@ public sealed class ConnectTests
         Assert.Equal("final-token", pair.Token);
         Assert.Equal(6, handler.Requests.Count);
         Assert.Equal(2, telemetryCount);
+    }
+
+    [Fact]
+    public void ScalesTheMpVerifySolutionDataWithDifficulty()
+    {
+        int[] expectedLengths = [1_024, 10_240, 102_400, 1_048_576, 10_485_760];
+
+        for (var difficulty = 1; difficulty <= expectedLengths.Length; difficulty++)
+        {
+            var challenge = new AwsWafChallenge(
+                "input",
+                "hmac",
+                "eu-west-1",
+                MemoryChallengeType,
+                difficulty,
+                256);
+            var solutionData = challenge.CreateMpVerifySolutionData();
+
+            Assert.Equal(expectedLengths[difficulty - 1], solutionData.Length);
+            Assert.All(solutionData, value => Assert.Equal(0, value));
+        }
     }
 
     [Fact]
@@ -268,6 +291,7 @@ public sealed class ConnectTests
         => "var _0x1234={}; ignored _0x1234[_0x5678(0x9abc)]='" + input +
            "',_0x1234[_0x5678(0xdef0)]='" + hmac +
            "',_0x1234[_0x5678(0x1234)]='" + region +
+           "',_0x1234[_0x5678(0x4567)]='" + MemoryChallengeType +
            "'; middle " + ObfuscatedKey + " 2.4.0 " + MathConstant + " parseInt('" + difficulty +
            "'); final parseInt('" + memory + "')";
 

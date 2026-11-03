@@ -177,6 +177,7 @@ public sealed class AwsWafTokenClient : IDisposable
             input,
             null,
             region,
+            GetOptionalString(root, "challenge_type") ?? embeddedChallenge.ChallengeType,
             GetOptionalInt(root, "difficulty") ?? embeddedChallenge.Difficulty,
             GetOptionalInt(root, "memory") ?? embeddedChallenge.Memory);
     }
@@ -188,6 +189,10 @@ public sealed class AwsWafTokenClient : IDisposable
         CancellationToken cancellationToken)
     {
         var signal = AwsBrowserSignal.CreateFingerprint();
+        if (challenge.ChallengeType != AwsWafChallenge.MemoryChallengeType)
+            throw new InvalidOperationException(
+                $"AWS WAF : type de challenge non supporté ({challenge.ChallengeType}).");
+
         var challengeNode = new JsonObject
         {
             ["input"] = challenge.Input,
@@ -213,7 +218,7 @@ public sealed class AwsWafTokenClient : IDisposable
             ["solution"] = null
         };
         var metadataJson = solutionMetadata.ToJsonString();
-        var solutionData = Convert.ToBase64String(new byte[1024]);
+        var solutionData = Convert.ToBase64String(challenge.CreateMpVerifySolutionData());
 
         using var content = new MultipartFormDataContent(CreateWebKitBoundary());
         AddFormField(content, "solution_metadata", metadataJson);
@@ -351,6 +356,13 @@ public sealed class AwsWafTokenClient : IDisposable
             return result;
         return null;
     }
+
+    private static string? GetOptionalString(JsonObject root, string name)
+        => root.TryGetPropertyValue(name, out var value) &&
+           value is JsonValue text &&
+           text.TryGetValue<string>(out var result)
+            ? result
+            : null;
 
     private sealed record AwsTokenResponse(string Token, int NextInterval);
     private sealed record Interstitial(string ChallengeUrl, JsonNode? GokuProps);
