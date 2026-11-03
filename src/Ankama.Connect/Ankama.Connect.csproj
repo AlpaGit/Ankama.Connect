@@ -7,8 +7,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="AwsBrowserSignal.gz.b64" />
     <InternalsVisibleTo Include="Ankama.Connect.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SkiaSharp" Version="4.154.0" />
   </ItemGroup>
 
 </Project>

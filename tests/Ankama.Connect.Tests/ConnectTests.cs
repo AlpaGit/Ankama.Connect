@@ -1,4 +1,5 @@
 using System.Net;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using Ankama.Connect;
@@ -10,6 +11,7 @@ public sealed class ConnectTests
 {
     private const string ChallengeUrl = "https://3f38f7f4f368.edge.sdk.awswaf.com/3f38f7f4f368/e1fcfc58118e/challenge.js";
     private const string ObfuscatedKey = "nMy3mwe1mtjImwuWmZvLywfIntnKogjLnZmXmJbKm2zInJHHmgnHmZq2yJK1nJbHywiZztvJzgy3ntnKnwu5oa";
+    private static readonly string MathConstant = "0x" + new string('f', 220);
 
     [Fact]
     public void ParsesStandardAndHistoricalProxyFormats()
@@ -29,6 +31,75 @@ public sealed class ConnectTests
         Assert.Equal(
             Convert.FromHexString("6f71a512b1e035eaab53d8be73120d3fb68a0ca346b9560aab3e5cdf753d5e98"),
             key);
+    }
+
+    [Fact]
+    public void GeneratesFingerprintAndTelemetryWithoutCapturedTemplates()
+    {
+        AwsBrowserSignal.UseChallengeScript(ObfuscatedKey + " 2.4.0 " + MathConstant);
+
+        var fingerprint = JsonDocument.Parse(AwsBrowserSignal.CreateFingerprint(new Random(42)).Json);
+        var telemetry = JsonDocument.Parse(AwsBrowserSignal.CreateTelemetry(new Random(43)).Json);
+        var repeatedFingerprint = JsonDocument.Parse(AwsBrowserSignal.CreateFingerprint(new Random(44)).Json);
+        var fingerprintRoot = fingerprint.RootElement;
+        var telemetryRoot = telemetry.RootElement;
+        var repeatedRoot = repeatedFingerprint.RootElement;
+
+        var histogram = fingerprintRoot.GetProperty("canvas").GetProperty("histogramBins");
+        Assert.Equal(256, histogram.GetArrayLength());
+        Assert.Equal(36_000, histogram.EnumerateArray().Sum(value => value.GetInt32()));
+        Assert.True(histogram.EnumerateArray().All(value => value.GetInt32() >= 0));
+        Assert.NotEqual(-1844565796, fingerprintRoot.GetProperty("canvas").GetProperty("hash").GetInt32());
+        Assert.Equal(
+            repeatedRoot.GetProperty("canvas").GetProperty("hash").GetInt32(),
+            fingerprintRoot.GetProperty("canvas").GetProperty("hash").GetInt32());
+        Assert.Equal(
+            repeatedRoot.GetProperty("canvas").GetProperty("histogramBins").EnumerateArray().Select(value => value.GetInt32()),
+            histogram.EnumerateArray().Select(value => value.GetInt32()));
+        Assert.Equal("2.4.0", fingerprintRoot.GetProperty("version").GetString());
+        Assert.Equal("2.4.0", telemetryRoot.GetProperty("tVersion").GetString());
+        Assert.True(fingerprintRoot.GetProperty("end").GetInt64() >= fingerprintRoot.GetProperty("start").GetInt64() + 130);
+        Assert.True(telemetryRoot.GetProperty("end").GetInt64() >= telemetryRoot.GetProperty("start").GetInt64() + 1);
+        Assert.True(telemetryRoot.GetProperty("ciba").GetProperty("start").GetInt64() <= telemetryRoot.GetProperty("start").GetInt64());
+    }
+
+    [Fact]
+    public void ComputesTheAwsCanvasCrc32()
+    {
+        Assert.Equal<uint>(0xCbf43926, AwsCrc32.ComputeUInt32("123456789"));
+        Assert.Equal("2639F4CB", AwsCrc32.ComputeChecksum("123456789"));
+    }
+
+    [Fact]
+    public void GeneratesCoherentMathAndBrowserMetrics()
+    {
+        AwsBrowserSignal.UseChallengeScript(ObfuscatedKey + " 2.4.0 " + MathConstant);
+
+        var fingerprint = JsonDocument.Parse(AwsBrowserSignal.CreateFingerprint(new Random(42)).Json).RootElement;
+        var math = fingerprint.GetProperty("math");
+        var tangent = double.Parse(math.GetProperty("tan").GetString()!, CultureInfo.InvariantCulture);
+        var sine = double.Parse(math.GetProperty("sin").GetString()!, CultureInfo.InvariantCulture);
+        var cosine = double.Parse(math.GetProperty("cos").GetString()!, CultureInfo.InvariantCulture);
+        var metrics = fingerprint.GetProperty("metrics");
+
+        Assert.Equal(tangent, sine / cosine, 12);
+        Assert.InRange(metrics.GetProperty("canvas").GetInt32(), 110, 170);
+        Assert.InRange(metrics.GetProperty("gpu").GetInt32(), 4, 10);
+        Assert.InRange(metrics.GetProperty("cdp").GetInt32(), 9, 18);
+    }
+
+    [Fact]
+    public void SerializesBrowserMetricsWithAwsFieldNames()
+    {
+        AwsBrowserSignal.UseChallengeScript(ObfuscatedKey + " 2.4.0 " + MathConstant);
+
+        var metrics = AwsBrowserSignal.CreateFingerprint(new Random(42)).Metrics;
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(metrics));
+        var metric = document.RootElement[0];
+
+        Assert.Equal("2", metric.GetProperty("name").GetString());
+        Assert.Equal(1, metric.GetProperty("value").GetInt32());
+        Assert.Equal("2", metric.GetProperty("unit").GetString());
     }
 
     [Fact]
@@ -84,7 +155,7 @@ public sealed class ConnectTests
             {
                 Assert.Equal("script", request.Headers.GetValues("sec-fetch-dest").Single());
                 Assert.Equal("no-cors", request.Headers.GetValues("sec-fetch-mode").Single());
-                return Script("// challenge " + ObfuscatedKey);
+                return Script("// challenge " + ObfuscatedKey + " 2.4.0 " + MathConstant);
             }
             if (request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath.EndsWith("/telemetry", StringComparison.Ordinal))
             {
@@ -192,7 +263,7 @@ public sealed class ConnectTests
         => "var _0x1234={}; ignored _0x1234[_0x5678(0x9abc)]='" + input +
            "',_0x1234[_0x5678(0xdef0)]='" + hmac +
            "',_0x1234[_0x5678(0x1234)]='" + region +
-           "'; middle " + ObfuscatedKey + " parseInt('" + difficulty +
+           "'; middle " + ObfuscatedKey + " 2.4.0 " + MathConstant + " parseInt('" + difficulty +
            "'); final parseInt('" + memory + "')";
 
     private sealed record CapturedRequest(HttpMethod Method, Uri Url);

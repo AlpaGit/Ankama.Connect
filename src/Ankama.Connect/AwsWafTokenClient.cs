@@ -9,8 +9,7 @@ namespace Ankama.Connect;
 
 public sealed class AwsWafTokenClient : IDisposable
 {
-    private const string LoginUrl = "https://auth.ankama.com/login/ankama?code_challenge=abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG&redirect_uri=zaap%3A%2F%2Flogin&client_id=102&direct=true&origin_tracker=https%3A%2F%2Fwww.ankama-launcher.com%2Flauncher";
-    private const string UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36";
+    private const string LoginUrl = AwsBrowserConstants.LoginLocation;
 
     private static readonly Regex ChallengeUrlPattern = new(
         "<script[^>]+src=[\"'](?<url>https?://[^\"']+challenge\\.js[^\"']*)[\"']",
@@ -53,11 +52,13 @@ public sealed class AwsWafTokenClient : IDisposable
             challenge,
             interstitial.GokuProps,
             ct);
+        var firstTelemetrySignal = AwsBrowserSignal.CreateTelemetry(Random.Shared, false);
         var firstTelemetry = await SendTelemetryAsync(
-            GetTelemetryUrl(interstitial.ChallengeUrl), verifyToken, CreateFirstTelemetryMetrics(), ct);
+            GetTelemetryUrl(interstitial.ChallengeUrl), verifyToken, firstTelemetrySignal, ct);
         await DelayAsync(firstTelemetry.NextInterval, ct);
+        var finalTelemetrySignal = AwsBrowserSignal.CreateTelemetry(Random.Shared, true);
         var finalTelemetry = await SendTelemetryAsync(
-            GetTelemetryUrl(interstitial.ChallengeUrl), firstTelemetry.Token, CreateSecondTelemetryMetrics(), ct);
+            GetTelemetryUrl(interstitial.ChallengeUrl), firstTelemetry.Token, finalTelemetrySignal, ct);
 
         return new AwsWafTokenPair(finalTelemetry.Token, finalTelemetry.Token);
     }
@@ -76,10 +77,11 @@ public sealed class AwsWafTokenClient : IDisposable
         var challengeUrl = GetChallengeUrl(pageHtml);
         var challengeScript = await GetChallengeScriptAsync(challengeUrl, ct);
         AwsBrowserSignal.UseChallengeScript(challengeScript);
+        var refreshedSignal = AwsBrowserSignal.CreateTelemetry(Random.Shared, true);
         var refreshed = await SendTelemetryAsync(
             GetTelemetryUrl(challengeUrl),
             existingToken,
-            CreateSecondTelemetryMetrics(),
+            refreshedSignal,
             ct);
         return new AwsWafTokenPair(refreshed.Token, refreshed.Token);
     }
@@ -95,7 +97,7 @@ public sealed class AwsWafTokenClient : IDisposable
 
     private void ConfigureDefaultHeaders()
     {
-        _client.DefaultRequestHeaders.UserAgent.ParseAdd(UserAgent);
+        _client.DefaultRequestHeaders.UserAgent.ParseAdd(AwsBrowserConstants.UserAgent);
         _client.DefaultRequestHeaders.Accept.ParseAdd("*/*");
         _client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("fr-FR");
         _client.DefaultRequestHeaders.Add("sec-ch-ua", "\"Chromium\";v=\"153\", \"Not_A Brand\";v=\"8\"");
@@ -206,7 +208,7 @@ public sealed class AwsWafTokenClient : IDisposable
             ["existing_token"] = null,
             ["client"] = "Browser",
             ["domain"] = "auth.ankama.com",
-            ["metrics"] = JsonSerializer.SerializeToNode(CreateFingerprintMetrics()),
+            ["metrics"] = JsonSerializer.SerializeToNode(signal.Metrics),
             ["goku_props"] = gokuProps,
             ["solution"] = null
         };
@@ -220,7 +222,11 @@ public sealed class AwsWafTokenClient : IDisposable
         var url = GetBaseUrl(challengeUrl) + "/mp_verify?region=" + Uri.EscapeDataString(challenge.Region);
         using var response = await PostAsync(url, content, cancellationToken);
         if (!response.IsSuccessStatusCode)
-            throw new InvalidOperationException($"AWS WAF : vérification HTTP {(int)response.StatusCode}.");
+        {
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            throw new InvalidOperationException(
+                $"AWS WAF : vérification HTTP {(int)response.StatusCode}. {body}");
+        }
 
         var result = await ReadTokenResponseAsync(response, cancellationToken);
         return result.Token;
@@ -229,10 +235,9 @@ public sealed class AwsWafTokenClient : IDisposable
     private async Task<AwsTokenResponse> SendTelemetryAsync(
         string telemetryUrl,
         string existingToken,
-        IReadOnlyList<object> metrics,
+        AwsSignalPayload signal,
         CancellationToken cancellationToken)
     {
-        var signal = AwsBrowserSignal.CreateTelemetry();
         var payload = new
         {
             existing_token = existingToken,
@@ -247,7 +252,7 @@ public sealed class AwsWafTokenClient : IDisposable
                 }
             },
             checksum = signal.Checksum,
-            metrics
+            metrics = signal.Metrics
         };
 
         using var content = new StringContent(
@@ -359,36 +364,4 @@ public sealed class AwsWafTokenClient : IDisposable
         return boundary.ToString();
     }
 
-    private static object[] CreateFingerprintMetrics()
-        => CreateMetrics(
-            ("2", 1, "2"), ("100", 0, "2"), ("102", 1, "2"), ("111", 138, "2"),
-            ("103", 6, "2"), ("104", 0, "2"), ("105", 0, "2"), ("106", 0, "2"), ("107", 0, "2"),
-            ("110", 0, "2"), ("108", 1, "2"), ("101", 0, "2"), ("115", 1, "2"), ("114", 13, "2"),
-            ("112", 0, "2"), ("3", 3.4, "2"), ("7", 0, "4"), ("1", 169.5, "2"),
-            ("4", 3, "2"), ("5", 0.5, "2"), ("6", 173, "2"), ("0", 282.9, "2"), ("8", 1, "4"));
-
-    private static object[] CreateFirstTelemetryMetrics()
-        => CreateMetrics(
-            ("12", 0.10059999999998581, "2"), ("200", 0, "2"), ("201", 0, "2"),
-            ("13", 0.8656999999998334, "2"), ("10", 0, "4"), ("9", 0, "4"), ("11", 3.197900000000118, "2"));
-
-    private static object[] CreateSecondTelemetryMetrics()
-        => CreateMetrics(
-            ("12", 0.053699999999935244, "2"), ("200", 0, "2"), ("201", 0, "2"),
-            ("13", 0.5283999999999196, "2"), ("10", 0, "4"), ("9", 0, "4"), ("11", 0.893100000000004, "2"));
-
-    private static object[] CreateMetrics(params (string Name, double Value, string Unit)[] values)
-        => values.Select(value => new
-        {
-            name = value.Name,
-            @value = Noisy(value.Value),
-            unit = value.Unit
-        }).ToArray();
-
-    private static double Noisy(double value)
-    {
-        if (value <= 1) return value;
-        var spread = Math.Max(0.05, Math.Abs(value) * 0.08);
-        return Math.Round((value + (Random.Shared.NextDouble() * 2 - 1) * spread) * 1000d, MidpointRounding.AwayFromZero) / 1000d;
-    }
 }

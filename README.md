@@ -6,6 +6,7 @@ Features:
 
 - OAuth/PKCE account login
 - AWS WAF token acquisition and refresh
+- browser fingerprint and telemetry generated without a captured template
 - banned-account detection
 - HTTP, HTTPS, SOCKS4 and SOCKS5 proxy support
 
