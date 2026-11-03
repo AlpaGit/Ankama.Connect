@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 
 namespace Ankama.Connect;
 
@@ -15,9 +16,17 @@ internal sealed record AwsSignalPayload(
 internal static class AwsBrowserSignal
 {
     private const string ResourceName = "Ankama.Connect.AwsBrowserSignal.gz.b64";
-    private static readonly byte[] Key = Convert.FromHexString("6f71a512b1e035eaab53d8be73120d3fb68a0ca346b9560aab3e5cdf753d5e98");
     private static readonly string FingerprintTemplate;
     private static readonly string TelemetryTemplate;
+    private static readonly Regex KeyCandidatePattern = new(
+        @"[A-Za-z0-9+/]{80,120}",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(2));
+    private static readonly Regex KeyPattern = new(
+        @"^[0-9a-f]{64}$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly object KeyLock = new();
+    private static byte[]? _key;
 
     static AwsBrowserSignal()
     {
@@ -69,12 +78,72 @@ internal static class AwsBrowserSignal
         var ciphertext = new byte[bytes.Length];
         var tag = new byte[16];
 
-        using var aes = new AesGcm(Key, 16);
+        using var aes = new AesGcm(GetKey(), 16);
         aes.Encrypt(nonce, bytes, ciphertext, tag);
 
         return Convert.ToBase64String(nonce) + "::" +
                Convert.ToHexString(ciphertext).ToLowerInvariant() +
                Convert.ToHexString(tag).ToLowerInvariant();
+    }
+
+    internal static void UseChallengeScript(string challengeScript)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(challengeScript);
+        var key = ExtractKey(challengeScript)
+            ?? throw new InvalidOperationException("AWS WAF : clé du signal navigateur introuvable.");
+
+        lock (KeyLock)
+        {
+            _key = key;
+        }
+    }
+
+    internal static byte[]? ExtractKey(string challengeScript)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(challengeScript);
+
+        foreach (Match candidate in KeyCandidatePattern.Matches(challengeScript))
+        {
+            var decoded = DecodeObfuscatedBase64(candidate.Value);
+            var text = Encoding.ASCII.GetString(decoded);
+            if (KeyPattern.IsMatch(text))
+                return Convert.FromHexString(text);
+        }
+
+        return null;
+    }
+
+    private static byte[] GetKey()
+    {
+        lock (KeyLock)
+        {
+            return _key ?? throw new InvalidOperationException("AWS WAF : clé du signal navigateur non initialisée.");
+        }
+    }
+
+    private static byte[] DecodeObfuscatedBase64(string value)
+    {
+        const string alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/";
+        var bytes = new List<byte>(value.Length * 3 / 4);
+        var accumulator = 0;
+        var bitCount = 0;
+
+        foreach (var character in value)
+        {
+            var index = alphabet.IndexOf(character);
+            if (index < 0)
+                throw new InvalidOperationException("AWS WAF : encodage du signal navigateur invalide.");
+
+            accumulator = (accumulator << 6) | index;
+            bitCount += 6;
+            if (bitCount < 8)
+                continue;
+
+            bitCount -= 8;
+            bytes.Add((byte)((accumulator >> bitCount) & 0xff));
+        }
+
+        return [.. bytes];
     }
 }
 

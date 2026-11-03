@@ -45,6 +45,7 @@ public sealed class AwsWafTokenClient : IDisposable
 
         var interstitial = await GetInterstitialAsync(ct);
         var challengeScript = await GetChallengeScriptAsync(interstitial.ChallengeUrl, ct);
+        AwsBrowserSignal.UseChallengeScript(challengeScript);
         var embeddedChallenge = AwsWafChallenge.Parse(challengeScript);
         var challenge = await GetChallengeInputsAsync(interstitial.ChallengeUrl, embeddedChallenge, ct);
         var verifyToken = await VerifyChallengeAsync(
@@ -73,7 +74,8 @@ public sealed class AwsWafTokenClient : IDisposable
         var ct = deadline.Token;
 
         var challengeUrl = GetChallengeUrl(pageHtml);
-        await GetChallengeScriptAsync(challengeUrl, ct);
+        var challengeScript = await GetChallengeScriptAsync(challengeUrl, ct);
+        AwsBrowserSignal.UseChallengeScript(challengeScript);
         var refreshed = await SendTelemetryAsync(
             GetTelemetryUrl(challengeUrl),
             existingToken,

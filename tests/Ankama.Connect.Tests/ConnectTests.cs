@@ -9,6 +9,7 @@ namespace Ankama.Connect.Tests;
 public sealed class ConnectTests
 {
     private const string ChallengeUrl = "https://3f38f7f4f368.edge.sdk.awswaf.com/3f38f7f4f368/e1fcfc58118e/challenge.js";
+    private const string ObfuscatedKey = "nMy3mwe1mtjImwuWmZvLywfIntnKogjLnZmXmJbKm2zInJHHmgnHmZq2yJK1nJbHywiZztvJzgy3ntnKnwu5oa";
 
     [Fact]
     public void ParsesStandardAndHistoricalProxyFormats()
@@ -18,6 +19,16 @@ public sealed class ConnectTests
 
         Assert.Equal(new Uri("socks5://127.0.0.1:1080"), standard.Address);
         Assert.Equal(new Uri("socks5://127.0.0.1:1080"), historical.Address);
+    }
+
+    [Fact]
+    public void ExtractsTheBrowserSignalKeyFromTheChallengeScript()
+    {
+        var key = AwsBrowserSignal.ExtractKey("prefix '" + ObfuscatedKey + "' suffix");
+
+        Assert.Equal(
+            Convert.FromHexString("6f71a512b1e035eaab53d8be73120d3fb68a0ca346b9560aab3e5cdf753d5e98"),
+            key);
     }
 
     [Fact]
@@ -73,7 +84,7 @@ public sealed class ConnectTests
             {
                 Assert.Equal("script", request.Headers.GetValues("sec-fetch-dest").Single());
                 Assert.Equal("no-cors", request.Headers.GetValues("sec-fetch-mode").Single());
-                return Script("// challenge");
+                return Script("// challenge " + ObfuscatedKey);
             }
             if (request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath.EndsWith("/telemetry", StringComparison.Ordinal))
             {
@@ -181,7 +192,7 @@ public sealed class ConnectTests
         => "var _0x1234={}; ignored _0x1234[_0x5678(0x9abc)]='" + input +
            "',_0x1234[_0x5678(0xdef0)]='" + hmac +
            "',_0x1234[_0x5678(0x1234)]='" + region +
-           "'; middle parseInt('" + difficulty +
+           "'; middle " + ObfuscatedKey + " parseInt('" + difficulty +
            "'); final parseInt('" + memory + "')";
 
     private sealed record CapturedRequest(HttpMethod Method, Uri Url);
