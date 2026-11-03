@@ -121,6 +121,11 @@ public sealed class ConnectTests
                 Assert.Contains("\"region\":\"eu-west-1\"", body);
                 Assert.Contains("\"goku_props\":{\"a\":\"b\"}", body);
                 Assert.DoesNotContain("\"hmac\"", body);
+                var metadata = JsonDocument.Parse(GetFormField(body, "solution_metadata")).RootElement;
+                var solutionData = Convert.FromBase64String(GetFormField(body, "solution_data"));
+                Assert.Equal(JsonValueKind.Null, metadata.GetProperty("solution").ValueKind);
+                Assert.Equal(1024, solutionData.Length);
+                Assert.All(solutionData, value => Assert.Equal(0, value));
                 return Json("{\"token\":\"verify-token\"}");
             }
             if (request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath.EndsWith("/telemetry", StringComparison.Ordinal))
@@ -265,6 +270,17 @@ public sealed class ConnectTests
            "',_0x1234[_0x5678(0x1234)]='" + region +
            "'; middle " + ObfuscatedKey + " 2.4.0 " + MathConstant + " parseInt('" + difficulty +
            "'); final parseInt('" + memory + "')";
+
+    private static string GetFormField(string body, string name)
+    {
+        var marker = "name=" + name + "\r\n\r\n";
+        var start = body.IndexOf(marker, StringComparison.Ordinal);
+        Assert.True(start >= 0, "Champ multipart introuvable : " + name);
+        start += marker.Length;
+        var end = body.IndexOf("\r\n--", start, StringComparison.Ordinal);
+        Assert.True(end > start, "Fin du champ multipart introuvable : " + name);
+        return body[start..end];
+    }
 
     private sealed record CapturedRequest(HttpMethod Method, Uri Url);
 
