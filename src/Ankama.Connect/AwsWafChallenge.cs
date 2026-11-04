@@ -14,8 +14,18 @@ internal sealed record AwsWafChallenge(
         "ha9faaffd31b4d5ede2a2e19d2d7fd525f66fee61911511960dcbb52d3c48ce25";
 
     private static readonly Regex Pattern = new(
-        @"var (?<object>_0x[0-9a-f]+)=\{\};[\s\S]*?\k<object>\[_0x[0-9a-f]+\(0x[0-9a-f]+\)\]='(?<input>[^']*)',\k<object>\[_0x[0-9a-f]+\(0x[0-9a-f]+\)\]='(?<hmac>[^']*)',\k<object>\[(?:'region'|_0x[0-9a-f]+\(0x[0-9a-f]+\))\]='(?<region>[^']+)'[;,][\s\S]*?\k<object>\[(?:'challenge_type'|_0x[0-9a-f]+\(0x[0-9a-f]+\))\]='(?<challenge_type>h[0-9a-f]{64})'[;,][\s\S]*?parseInt\('(?<difficulty>\d+)'\);[\s\S]*?parseInt\('(?<memory>\d+)'\)",
+        @"var (?<object>_0x[0-9a-f]+)=\{\};[\s\S]*?\k<object>\[_0x[0-9a-f]+\(0x[0-9a-f]+\)\]='(?<input>[^']*)',\k<object>\[_0x[0-9a-f]+\(0x[0-9a-f]+\)\]='(?<hmac>[^']*)',\k<object>\[(?:'region'|_0x[0-9a-f]+\(0x[0-9a-f]+\))\]='(?<region>[^']+)'[;,]",
         RegexOptions.Singleline | RegexOptions.Compiled | RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(5));
+
+    private static readonly Regex ChallengeTypePattern = new(
+        @"'(?<challenge_type>h[0-9a-f]{64})'",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(5));
+
+    private static readonly Regex DifficultyPattern = new(
+        @"parseInt\('(?<difficulty>\d+)'\);[\s\S]*?parseInt\('(?<memory>\d+)'\)",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant,
         TimeSpan.FromSeconds(5));
 
     public static AwsWafChallenge Parse(string script)
@@ -25,14 +35,20 @@ internal sealed record AwsWafChallenge(
         var match = Pattern.Match(script);
         if (!match.Success)
             throw new InvalidOperationException("AWS WAF : challenge intégré introuvable.");
+        var challengeType = ChallengeTypePattern.Match(script);
+        if (!challengeType.Success)
+            throw new InvalidOperationException("AWS WAF : type de challenge intégré introuvable.");
+        var difficultyMatch = DifficultyPattern.Match(script);
+        if (!difficultyMatch.Success)
+            throw new InvalidOperationException("AWS WAF : difficulté du challenge intégrée introuvable.");
 
         return new AwsWafChallenge(
             match.Groups["input"].Value,
             match.Groups["hmac"].Value,
             match.Groups["region"].Value,
-            match.Groups["challenge_type"].Value,
-            int.Parse(match.Groups["difficulty"].Value),
-            int.Parse(match.Groups["memory"].Value));
+            challengeType.Groups["challenge_type"].Value,
+            int.Parse(difficultyMatch.Groups["difficulty"].Value),
+            int.Parse(difficultyMatch.Groups["memory"].Value));
     }
 
     public byte[] CreateMpVerifySolutionData() => ChallengeType switch
